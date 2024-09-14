@@ -136,33 +136,43 @@ static void init_event(log_Event *ev, void *udata) {
   ev->udata = udata;
 }
 
-
 void log_log(int level, const char *file, int line, const char *fmt, ...) {
-  log_Event ev = {
-    .fmt   = fmt,
-    .file  = file,
-    .line  = line,
-    .level = level,
-  };
-
-  lock();
-
-  if (!L.quiet && level >= L.level) {
-    init_event(&ev, stderr);
-    va_start(ev.ap, fmt);
-    stdout_callback(&ev);
-    va_end(ev.ap);
-  }
-
-  for (int i = 0; i < MAX_CALLBACKS && L.callbacks[i].fn; i++) {
-    Callback *cb = &L.callbacks[i];
-    if (level >= cb->level) {
-      init_event(&ev, cb->udata);
-      va_start(ev.ap, fmt);
-      cb->fn(&ev);
-      va_end(ev.ap);
+    // 提前判断，若日志级别不足且处于静默模式，直接返回
+    if (L.quiet && level < L.level) {
+        return;
     }
-  }
 
-  unlock();
+    log_Event ev;
+    ev.fmt = fmt;
+    ev.file = file;
+    ev.line = line;
+    ev.level = level;
+
+    va_list ap;
+    va_start(ap, fmt);
+
+    lock();
+
+    if (!L.quiet && level >= L.level) {
+        init_event(&ev, stderr);
+        ev.ap = ap;
+        stdout_callback(&ev);
+    }
+
+    for (int i = 0; i < MAX_CALLBACKS && L.callbacks[i].fn; i++) {
+        Callback *cb = &L.callbacks[i];
+        if (level >= cb->level) {
+            init_event(&ev, cb->udata);
+            va_list ap_copy;
+            va_copy(ap_copy, ap);
+            ev.ap = ap_copy;
+            cb->fn(&ev);
+            va_end(ap_copy);
+        }
+    }
+
+    unlock();
+
+    va_end(ap);
 }
+
